@@ -3,8 +3,6 @@
 from datetime import datetime, timezone
 import json
 from pathlib import Path
-import re
-import time
 
 from dagster import (
     AssetExecutionContext,
@@ -18,23 +16,18 @@ from dagster import (
 )
 from dagster_dbt import DagsterDbtTranslator, dbt_assets
 from dagster_dbt.core.dbt_cli_invocation import DbtCoreCliEventMessage
-from deltalake import DeltaTable
-import pyarrow.compute as pc
 
-from delta_settlement_lakehouse.domain.models import RawPaymentEvent
-from delta_settlement_lakehouse.engines.chaos_generator import SyntheticFeedGenerator
-from delta_settlement_lakehouse.engines.contract_validator import DataContractValidator
 from delta_settlement_lakehouse.engines.dbt_bridge import (
     DEFAULT_DBT_PROJECT_DIR,
     DEFAULT_DUCKDB_PATH,
     DEFAULT_LAKEHOUSE_BASE_PATH,
     DeltaAnalyticsBridge,
 )
-from delta_settlement_lakehouse.engines.delta_storage import DeltaLakeStorage
-from delta_settlement_lakehouse.services.bronze_service import BronzeService
-from delta_settlement_lakehouse.services.silver_service import SilverService
-
-_DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+from delta_settlement_lakehouse.orchestration.tasks import (
+    execute_bronze_ingestion,
+    execute_dbt_analytics_build,
+    execute_silver_contract_gate,
+)
 
 
 class LakehouseRuntimeResource(ConfigurableResource):
@@ -64,17 +57,6 @@ def ensure_dbt_manifest(project_dir: Path, duckdb_path: Path | None = None) -> P
     return manifest_path
 
 
-def _validate_batch_date(batch_date: str) -> str:
-    if not _DATE_PATTERN.match(batch_date):
-        raise ValueError(f"Invalid batch_date '{batch_date}'; expected YYYY-MM-DD.")
-    return batch_date
-
-
-def _delete_delta_partition(storage: DeltaLakeStorage, table_name: str, predicate: str) -> None:
-    if storage.table_exists(table_name):
-        DeltaTable(storage._get_table_path(table_name)).delete(predicate=predicate)
-
-
 def build_settlement_assets(project_dir: Path = DEFAULT_DBT_PROJECT_DIR) -> list:
     """Construct the full Medallion + dbt Asset list bound to the compiled dbt manifest."""
     manifest_path = ensure_dbt_manifest(project_dir=project_dir)
@@ -90,29 +72,25 @@ def build_settlement_assets(project_dir: Path = DEFAULT_DBT_PROJECT_DIR) -> list
         context: AssetExecutionContext,
         runtime: LakehouseRuntimeResource,
     ) -> Output[str]:
-        start = time.perf_counter()
-        batch_date = _validate_batch_date(runtime.batch_date)
-        storage = DeltaLakeStorage(base_path=runtime.lakehouse_base_path)
-        _delete_delta_partition(storage, "bronze_raw_events", f"ingestion_date = '{batch_date}'")
-
-        generator = SyntheticFeedGenerator(seed=runtime.seed)
-        raw_events = generator.generate_batch(
+        res = execute_bronze_ingestion(
+            lakehouse_base_path=runtime.lakehouse_base_path,
+            batch_date=runtime.batch_date,
             count=runtime.count,
-            batch_date=batch_date,
+            seed=runtime.seed,
             inject_chaos=runtime.inject_chaos,
             chaos_ratio=runtime.chaos_ratio,
         )
-        version = BronzeService(storage=storage).ingest_batch(raw_events)
-        elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
-        context.log.info(f"Bronze ingested {len(raw_events)} events for {batch_date} (Delta v{version})")
+        context.log.info(
+            f"Bronze ingested {res.row_count} events for {res.batch_date} (Delta v{res.delta_version})"
+        )
 
         return Output(
-            value=batch_date,
+            value=res.batch_date,
             metadata={
-                "batch_date": batch_date,
-                "row_count": len(raw_events),
-                "delta_version": version,
-                "duration_ms": elapsed_ms,
+                "batch_date": res.batch_date,
+                "row_count": res.row_count,
+                "delta_version": res.delta_version,
+                "duration_ms": res.elapsed_ms,
             },
         )
 
@@ -138,67 +116,41 @@ def build_settlement_assets(project_dir: Path = DEFAULT_DBT_PROJECT_DIR) -> list
         runtime: LakehouseRuntimeResource,
         batch_date: str,
     ):
-        start = time.perf_counter()
-        clean_date = _validate_batch_date(batch_date)
-        storage = DeltaLakeStorage(base_path=runtime.lakehouse_base_path)
-
-        bronze_table = storage.read_table("bronze_raw_events")
-        filtered = bronze_table.filter(pc.equal(bronze_table["ingestion_date"], clean_date))
-        events = [
-            RawPaymentEvent(
-                event_id=row["event_id"],
-                batch_id=row["batch_id"],
-                ingested_at_utc=row["ingested_at_utc"],
-                ingestion_date=row["ingestion_date"],
-                source_feed=row["source_feed"],
-                raw_payload=row["raw_payload"],
-            )
-            for row in filtered.to_pylist()
-        ]
-
-        _delete_delta_partition(storage, "silver_settlements", f"settlement_date = '{clean_date}'")
-        date_token = clean_date.replace("-", "")
-        _delete_delta_partition(storage, "silver_quarantine_dlq", f"batch_id LIKE 'batch_{date_token}_%'")
-
-        silver_service = SilverService(storage=storage, validator=DataContractValidator())
-        valid_records, dlq_records = silver_service.process_events(events)
-
-        bridge = DeltaAnalyticsBridge(project_dir=Path(runtime.dbt_project_dir))
-        bridge.hydrate_sources(
+        res = execute_silver_contract_gate(
             lakehouse_base_path=runtime.lakehouse_base_path,
             duckdb_path=Path(runtime.duckdb_path),
+            dbt_project_dir=Path(runtime.dbt_project_dir),
+            batch_date=batch_date,
         )
-
-        elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
         context.log.info(
-            f"Silver gate [{clean_date}]: {len(valid_records)} valid, {len(dlq_records)} DLQ ({elapsed_ms} ms)"
+            f"Silver gate [{res.batch_date}]: {res.silver_count} valid, {res.dlq_count} DLQ ({res.elapsed_ms} ms)"
         )
 
         yield Output(
-            value=len(valid_records),
+            value=res.silver_count,
             output_name="silver_settlements",
             metadata={
-                "batch_date": clean_date,
-                "row_count": len(valid_records),
-                "duration_ms": elapsed_ms,
+                "batch_date": res.batch_date,
+                "row_count": res.silver_count,
+                "duration_ms": res.elapsed_ms,
             },
         )
         yield Output(
-            value=len(dlq_records),
+            value=res.dlq_count,
             output_name="silver_quarantine_dlq",
             metadata={
-                "batch_date": clean_date,
-                "dlq_count": len(dlq_records),
+                "batch_date": res.batch_date,
+                "dlq_count": res.dlq_count,
                 "quarantined_at_utc": datetime.now(timezone.utc).isoformat(),
             },
         )
 
     @dbt_assets(manifest=manifest_path)
     def settlement_dbt_assets(context: AssetExecutionContext, runtime: LakehouseRuntimeResource):
-        bridge = DeltaAnalyticsBridge(project_dir=Path(runtime.dbt_project_dir))
-        res = bridge.run_dbt(
-            args=["build"],
+        dbt_dir = Path(runtime.dbt_project_dir)
+        res = execute_dbt_analytics_build(
             duckdb_path=Path(runtime.duckdb_path),
+            dbt_project_dir=dbt_dir,
         )
         for raw_event in res.raw_events:
             yield from DbtCoreCliEventMessage(
@@ -208,7 +160,7 @@ def build_settlement_assets(project_dir: Path = DEFAULT_DBT_PROJECT_DIR) -> list
                 manifest=manifest_dict,
                 dagster_dbt_translator=translator,
                 context=context,
-                target_path=bridge.project_dir / "target",
+                target_path=dbt_dir / "target",
             )
         if not res.success:
             raise RuntimeError(f"dbt build failed: {res.error_message}")

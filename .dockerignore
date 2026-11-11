@@ -1,0 +1,15 @@
+.git
+.pytest_cache
+__pycache__
+*.pyc
+.venv
+venv
+data
+airflow/logs
+dbt_analytics/target
+dbt_analytics/logs
+dbt_analytics/dbt_packages
+architecture_diagram.png
+specs
+docs
+

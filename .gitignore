@@ -12,6 +12,9 @@ dbt_analytics/target/
 dbt_analytics/logs/
 dbt_analytics/dbt_packages/
 .dagster/
+airflow/logs/
+airflow/*.db
+airflow/airflow.cfg
 
 # Virtual Environments
 .venv/

@@ -1,0 +1,30 @@
+FROM apache/airflow:2.10.5-python3.12
+
+LABEL maintainer="Ronald Solares"
+LABEL description="Apache Airflow 2.10.5 image with isolated /opt/lakehouse_venv for Delta Lake, DuckDB, and dbt-duckdb"
+
+USER root
+RUN mkdir -p /opt/lakehouse_venv /opt/airflow/project \
+    && chown -R airflow:root /opt/lakehouse_venv /opt/airflow/project
+
+USER airflow
+
+# Isolate Lakehouse & dbt-core>=1.10 (protobuf>=6) from Airflow's base runtime (opentelemetry protobuf<5)
+RUN python -m venv /opt/lakehouse_venv \
+    && /opt/lakehouse_venv/bin/pip install --no-cache-dir --upgrade pip \
+    && /opt/lakehouse_venv/bin/pip install --no-cache-dir \
+        "deltalake>=1.0.0" \
+        "duckdb>=1.1.0" \
+        "pyarrow>=15.0.0" \
+        "polars>=1.0.0" \
+        "pydantic>=2.7.0" \
+        "typer>=0.12.0" \
+        "rich>=13.7.0" \
+        "dbt-core>=1.9.0,<1.11.0" \
+        "dbt-duckdb>=1.9.0,<1.11.0" \
+    && /opt/lakehouse_venv/bin/pip check \
+    && pip check
+
+ENV LAKEHOUSE_PYTHON_BIN=/opt/lakehouse_venv/bin/python
+ENV PYTHONPATH=/opt/airflow/project
+
