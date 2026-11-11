@@ -1,0 +1,47 @@
+version: 2
+
+models:
+  - name: dim_corridors
+    description: "Currency corridor dimension aggregated across validated settlements."
+    columns:
+      - name: corridor_id
+        description: "Canonical source-to-target currency corridor key (e.g., USD-EUR)."
+        data_tests:
+          - not_null
+          - unique
+      - name: settlement_currency
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "SGD", "CLP", "BRL", "MXN"]
+
+  - name: fct_daily_settlements
+    description: "Daily financial reconciliation mart partitioned logically by settlement_date and currency."
+    columns:
+      - name: settlement_date
+        data_tests:
+          - not_null
+      - name: settlement_currency
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "SGD", "CLP", "BRL", "MXN"]
+      - name: transaction_count
+        data_tests:
+          - not_null
+
+  - name: fct_counterparty_exposure
+    description: "Bilateral SWIFT BIC institutional credit exposure summary."
+    columns:
+      - name: sender_bic
+        data_tests:
+          - not_null
+      - name: receiver_bic
+        data_tests:
+          - not_null
+      - name: net_volume
+        data_tests:
+          - not_null
+

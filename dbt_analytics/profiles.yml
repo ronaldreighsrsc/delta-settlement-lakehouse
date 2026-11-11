@@ -1,0 +1,9 @@
+delta_settlement_analytics:
+  target: dev
+  outputs:
+    dev:
+      type: duckdb
+      path: "{{ env_var('LAKEHOUSE_DUCKDB_PATH', '../data/lakehouse/analytics.duckdb') }}"
+      schema: main
+      threads: 1
+

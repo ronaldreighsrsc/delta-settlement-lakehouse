@@ -1,0 +1,55 @@
+version: 2
+
+models:
+  - name: stg_settlements
+    description: "Cleaned and type-standardized view over Delta silver_settlements."
+    columns:
+      - name: transaction_id
+        description: "Unique B2B cross-border transaction identifier."
+        data_tests:
+          - not_null
+          - unique
+      - name: settlement_currency
+        description: "Source clearing currency (ISO 4217)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "SGD", "CLP", "BRL", "MXN"]
+      - name: target_currency
+        description: "Destination currency (ISO 4217)."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "SGD", "CLP", "BRL", "MXN"]
+      - name: status
+        description: "Settlement lifecycle status."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ["PENDING", "SETTLED", "FAILED", "QUARANTINED"]
+
+  - name: stg_quarantine_dlq
+    description: "Quarantined payment events rejected by the Silver Data Contract gate."
+    columns:
+      - name: event_id
+        description: "Unique raw ingestion event UUID."
+        data_tests:
+          - not_null
+          - unique
+      - name: error_code
+        description: "Canonical rejection code extracted from rejection_reason."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - "ERR_INVALID_CURRENCY"
+                  - "ERR_INVALID_SWIFT_BIC"
+                  - "ERR_NON_POSITIVE_AMOUNT"
+                  - "ERR_INVALID_TIMESTAMP"
+                  - "ERR_MALFORMED_JSON"
+                  - "ERR_MISSING_REQUIRED_FIELD"
+

@@ -1,0 +1,12 @@
+version: 2
+
+sources:
+  - name: raw_lakehouse
+    description: "Committed Delta Lake Silver & DLQ snapshots hydrated atomically into DuckDB."
+    schema: raw_lakehouse
+    tables:
+      - name: silver_settlements
+        description: "Validated ISO 4217 / SWIFT BIC cross-border B2B settlements."
+      - name: silver_quarantine_dlq
+        description: "Quarantined payloads violating data quality contracts."
+

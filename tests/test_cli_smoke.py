@@ -45,3 +45,21 @@ def test_cli_run_pipeline_and_inspect(tmp_path):
     ])
     assert recon_res.exit_code == 0
     assert "Gold Daily Reconciliation" in recon_res.stdout
+
+
+def test_cli_orchestrate_smoke(tmp_path):
+    duckdb_path = tmp_path / "cli_analytics.duckdb"
+    lakehouse_path = str(tmp_path / "cli_lakehouse")
+
+    orch_res = runner.invoke(app, [
+        "orchestrate",
+        "--base-path", lakehouse_path,
+        "--duckdb-path", str(duckdb_path),
+        "--count", "25",
+        "--date", "2026-10-25",
+        "--chaos",
+        "--chaos-ratio", "0.12",
+    ])
+    assert orch_res.exit_code == 0, orch_res.stdout
+    assert "Dagster + dbt Orchestration Completed" in orch_res.stdout
+    assert duckdb_path.exists()

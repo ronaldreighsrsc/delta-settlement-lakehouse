@@ -175,5 +175,45 @@ def audit_table(
     console.print(f"[bold green]Snapshot at version {target_ver}:[/bold green] [white]{target_table.num_rows} total rows.[/white]")
 
 
+@app.command()
+def orchestrate(
+    base_path: str = typer.Option("data/lakehouse", "--base-path", "-p", help="Storage directory for Delta tables"),
+    duckdb_path: str = typer.Option("data/lakehouse/analytics.duckdb", "--duckdb-path", "-k", help="Target DuckDB file for dbt models"),
+    date: str = typer.Option("2026-10-08", "--date", "-d", help="Settlement date (YYYY-MM-DD)"),
+    count: int = typer.Option(100, "--count", "-n", help="Number of synthetic payment events to generate"),
+    chaos: bool = typer.Option(False, "--chaos/--no-chaos", help="Inject synthetic data contract anomalies for DLQ testing"),
+    chaos_ratio: float = typer.Option(0.08, "--chaos-ratio", help="Probability of chaotic corruption per event"),
+    seed: int = typer.Option(42, "--seed", help="Deterministic generator seed"),
+):
+    """Execute the end-to-end Dagster Software-Defined Asset DAG (Bronze -> Silver/DLQ -> dbt DuckDB marts)."""
+    from pathlib import Path
+    from delta_settlement_lakehouse.orchestration.definitions import run_orchestrated_pipeline
+
+    res = run_orchestrated_pipeline(
+        lakehouse_base_path=base_path,
+        duckdb_path=Path(duckdb_path),
+        batch_date=date,
+        count=count,
+        inject_chaos=chaos,
+        chaos_ratio=chaos_ratio,
+        seed=seed,
+    )
+
+    if not res.success:
+        console.print("[bold red]Dagster + dbt Orchestration Failed.[/bold red]")
+        raise typer.Exit(code=1)
+
+    summary = Table(show_header=True, header_style="bold cyan", border_style="green")
+    summary.add_column("DAG Stage / Asset")
+    summary.add_column("Outcome", justify="right")
+    summary.add_row("bronze_raw_events (Delta)", f"{res.bronze_count} events")
+    summary.add_row("silver_settlements (Delta)", f"{res.silver_count} valid")
+    summary.add_row("silver_quarantine_dlq (Delta)", f"{res.dlq_count} quarantined")
+    summary.add_row("dbt-duckdb Gold Marts & Tests", str(res.duckdb_path))
+
+    console.print(Panel("[bold green]Dagster + dbt Orchestration Completed[/bold green]", border_style="green"))
+    console.print(summary)
+
+
 if __name__ == "__main__":
     app()
