@@ -60,9 +60,14 @@ def settlement_medallion_dag() -> None:
             "LAKEHOUSE_BASE_PATH",
             str(DEFAULT_PROJECT_ROOT / "data" / "lakehouse"),
         )
+        default_duckdb_path = (
+            DEFAULT_PROJECT_ROOT / "data" / "lakehouse" / "analytics.duckdb"
+            if lakehouse_base_path.startswith("s3://")
+            else Path(lakehouse_base_path) / "analytics.duckdb"
+        )
         duckdb_path = os.environ.get(
             "LAKEHOUSE_DUCKDB_PATH",
-            str(Path(lakehouse_base_path) / "analytics.duckdb"),
+            str(default_duckdb_path),
         )
         dbt_project_dir = os.environ.get(
             "LAKEHOUSE_DBT_PROJECT_DIR",

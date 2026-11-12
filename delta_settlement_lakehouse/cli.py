@@ -9,7 +9,10 @@ import typer
 
 from delta_settlement_lakehouse.engines.chaos_generator import SyntheticFeedGenerator
 from delta_settlement_lakehouse.engines.contract_validator import DataContractValidator
-from delta_settlement_lakehouse.engines.delta_storage import DeltaLakeStorage
+from delta_settlement_lakehouse.engines.delta_storage import (
+    DeltaLakeStorage,
+    resolve_lakehouse_storage,
+)
 from delta_settlement_lakehouse.engines.olap_engine import OlapEngine
 from delta_settlement_lakehouse.services.bronze_service import BronzeService
 from delta_settlement_lakehouse.services.gold_service import GoldService
@@ -40,7 +43,7 @@ def run_pipeline(
         border_style="cyan"
     ))
 
-    storage = DeltaLakeStorage(base_path=base_path)
+    storage = resolve_lakehouse_storage(DeltaLakeStorage, base_path)
     validator = DataContractValidator()
     olap = OlapEngine()
 
@@ -83,7 +86,7 @@ def inspect_dlq(
     limit: int = typer.Option(20, "--limit", "-l", help="Max records to display"),
 ):
     """Inspects quarantined events diverted by the Data Contract Gate."""
-    storage = DeltaLakeStorage(base_path=base_path)
+    storage = resolve_lakehouse_storage(DeltaLakeStorage, base_path)
     if not storage.table_exists("silver_quarantine_dlq"):
         console.print("[yellow]No quarantine table found. All data is valid or pipeline has not run.[/yellow]")
         return
@@ -109,7 +112,7 @@ def reconcile(
     date: str = typer.Option("2026-10-08", "--date", "-d", help="Settlement date to inspect"),
 ):
     """Displays Gold layer daily reconciliation summary."""
-    storage = DeltaLakeStorage(base_path=base_path)
+    storage = resolve_lakehouse_storage(DeltaLakeStorage, base_path)
     if not storage.table_exists("gold_daily_reconciliation"):
         console.print("[yellow]No gold reconciliation table found. Run pipeline first.[/yellow]")
         return
@@ -147,7 +150,7 @@ def audit_table(
     version: Optional[int] = typer.Option(None, "--version", "-v", help="Historical version for Time Travel"),
 ):
     """Performs Time Travel inspection and audits Delta transaction history."""
-    storage = DeltaLakeStorage(base_path=base_path)
+    storage = resolve_lakehouse_storage(DeltaLakeStorage, base_path)
     if not storage.table_exists(table):
         console.print(f"[red]Table '{table}' does not exist.[/red]")
         return

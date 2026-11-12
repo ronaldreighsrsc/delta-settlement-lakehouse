@@ -11,9 +11,20 @@ x-airflow-common: &airflow-common
     AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-local_dev_secret_key_change_in_prod}
     PYTHONPATH: /opt/airflow/project
     LAKEHOUSE_PROJECT_ROOT: /opt/airflow/project
-    LAKEHOUSE_BASE_PATH: /opt/airflow/project/data/lakehouse
-    LAKEHOUSE_DUCKDB_PATH: /opt/airflow/project/data/lakehouse/analytics.duckdb
+    LAKEHOUSE_BASE_PATH: ${LAKEHOUSE_BASE_PATH:-/opt/airflow/project/data/lakehouse}
+    LAKEHOUSE_DUCKDB_PATH: ${LAKEHOUSE_DUCKDB_PATH:-/opt/airflow/project/data/lakehouse/analytics.duckdb}
     LAKEHOUSE_DBT_PROJECT_DIR: /opt/airflow/project/dbt_analytics
+    LAKEHOUSE_S3_BRONZE_BUCKET: ${LAKEHOUSE_S3_BRONZE_BUCKET:-}
+    LAKEHOUSE_S3_SILVER_BUCKET: ${LAKEHOUSE_S3_SILVER_BUCKET:-}
+    LAKEHOUSE_S3_DLQ_BUCKET: ${LAKEHOUSE_S3_DLQ_BUCKET:-}
+    LAKEHOUSE_S3_GOLD_BUCKET: ${LAKEHOUSE_S3_GOLD_BUCKET:-}
+    AWS_ENDPOINT_URL: ${AWS_ENDPOINT_URL:-}
+    AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+    AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    AWS_REGION: ${AWS_REGION:-us-east-1}
+    AWS_DEFAULT_REGION: ${AWS_DEFAULT_REGION:-us-east-1}
+    AWS_ALLOW_HTTP: ${AWS_ALLOW_HTTP:-}
+    AWS_S3_ALLOW_UNSAFE_RENAME: ${AWS_S3_ALLOW_UNSAFE_RENAME:-}
   volumes:
     - ./:/opt/airflow/project
     - ./airflow/logs:/opt/airflow/logs
@@ -87,6 +98,85 @@ services:
         condition: service_completed_successfully
     restart: unless-stopped
 
+  s3-mock:
+    build:
+      context: .
+      dockerfile: Dockerfile.s3-mock
+    image: settlement-lakehouse-s3-mock:5.x
+    profiles: ["cloud"]
+    environment:
+      AWS_DEFAULT_REGION: us-east-1
+    ports:
+      - "${S3_MOCK_PORT:-5000}:5000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:5000/moto-api/ >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  terraform-init:
+    image: hashicorp/terraform:1.9
+    profiles: ["cloud"]
+    working_dir: /workspace
+    environment:
+      TF_IN_AUTOMATION: "true"
+      TF_PLUGIN_CACHE_DIR: /root/.terraform.d/plugin-cache
+    volumes:
+      - ./infra/terraform:/workspace
+      - terraform_plugins:/root/.terraform.d/plugin-cache
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        mkdir -p /root/.terraform.d/plugin-cache && \
+        if [ -d /root/.terraform.d/plugin-cache/registry.terraform.io ]; then \
+          terraform init -input=false -plugin-dir=/root/.terraform.d/plugin-cache; \
+        else \
+          terraform init -input=false; \
+        fi && \
+        terraform apply -auto-approve -input=false -var-file=environments/local-docker.tfvars
+    depends_on:
+      s3-mock:
+        condition: service_healthy
+
+  airflow-cloud:
+    <<: *airflow-common
+    profiles: ["cloud"]
+    command: webserver
+    environment:
+      AIRFLOW__CORE__EXECUTOR: LocalExecutor
+      AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://${POSTGRES_USER:-airflow}:${POSTGRES_PASSWORD:-airflow_dev_only}@postgres/${POSTGRES_DB:-airflow}
+      AIRFLOW__CORE__DAGS_FOLDER: /opt/airflow/project/airflow/dags
+      AIRFLOW__CORE__LOAD_EXAMPLES: "false"
+      AIRFLOW__WEBSERVER__SECRET_KEY: ${AIRFLOW_SECRET_KEY:-local_dev_secret_key_change_in_prod}
+      PYTHONPATH: /opt/airflow/project
+      LAKEHOUSE_PROJECT_ROOT: /opt/airflow/project
+      LAKEHOUSE_BASE_PATH: /opt/airflow/project/data/lakehouse
+      LAKEHOUSE_DUCKDB_PATH: /opt/airflow/project/data/lakehouse/analytics.duckdb
+      LAKEHOUSE_DBT_PROJECT_DIR: /opt/airflow/project/dbt_analytics
+      LAKEHOUSE_S3_BRONZE_BUCKET: s3://settlement-lakehouse-bronze-dev
+      LAKEHOUSE_S3_SILVER_BUCKET: s3://settlement-lakehouse-silver-dev
+      LAKEHOUSE_S3_DLQ_BUCKET: s3://settlement-lakehouse-dlq-dev
+      LAKEHOUSE_S3_GOLD_BUCKET: s3://settlement-lakehouse-gold-dev
+      AWS_ENDPOINT_URL: http://s3-mock:5000
+      AWS_ACCESS_KEY_ID: mock_access_key
+      AWS_SECRET_ACCESS_KEY: mock_secret_key
+      AWS_REGION: us-east-1
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_ALLOW_HTTP: "true"
+      AWS_S3_ALLOW_UNSAFE_RENAME: "true"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      airflow-init:
+        condition: service_completed_successfully
+      s3-mock:
+        condition: service_healthy
+      terraform-init:
+        condition: service_completed_successfully
+
 volumes:
   postgres_airflow_data:
+  terraform_plugins:
 

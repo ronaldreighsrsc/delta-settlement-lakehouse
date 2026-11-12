@@ -40,6 +40,16 @@ ENV/
 *.key
 *.pem
 
+# Terraform state, caches & user overrides
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+*.tfvars
+!infra/terraform/environments/local-docker.tfvars
+!infra/terraform/environments/localstack.tfvars
+!*.tfvars.example
+
 # Local scratch scripts
 comparar_wifi.ps1
 

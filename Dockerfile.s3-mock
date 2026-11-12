@@ -1,0 +1,15 @@
+FROM apache/airflow:2.10.5-python3.12
+
+LABEL maintainer="Ronald Solares"
+LABEL description="Lightweight AWS S3/IAM/STS mock server (Moto) for $0 local Terraform and Delta S3 execution"
+
+USER root
+RUN python -m venv /opt/moto_venv \
+    && /opt/moto_venv/bin/pip install --no-cache-dir --timeout 60 --retries 5 \
+        "moto[s3]>=5.0,<6.0" \
+        "flask>=3.0,<4.0" \
+        "flask-cors>=4.0,<6.0"
+
+EXPOSE 5000
+ENTRYPOINT ["/opt/moto_venv/bin/moto_server", "-H", "0.0.0.0", "-p", "5000"]
+

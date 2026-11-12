@@ -1,0 +1,9 @@
+# Copy to prod.tfvars (gitignored) and adjust project_prefix + email before deploying to AWS Free Plan
+aws_region               = "us-east-1"
+environment              = "prod"
+project_prefix           = "settlement-lakehouse-ronald-unique"
+use_local_endpoint       = false
+enable_budget_guard      = true
+monthly_budget_limit_usd = "1.0"
+budget_alert_email       = "your-email@example.com"
+

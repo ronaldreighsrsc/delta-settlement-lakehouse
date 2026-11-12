@@ -189,6 +189,46 @@ def test_docker_compose_and_airflow_image_contracts():
     assert ".env" in gitignore_text
 
 
+def test_docker_compose_cloud_profile_and_s3_dag_contracts():
+    """Spec 004 T3 / RF-6: Opt-in cloud Compose profile wires s3-mock, terraform-init, and Airflow S3 env."""
+    s3_dockerfile = PROJECT_ROOT / "Dockerfile.s3-mock"
+    compose_file = PROJECT_ROOT / "docker-compose.yml"
+    env_example = PROJECT_ROOT / ".env.example"
+
+    assert s3_dockerfile.exists(), "Missing Dockerfile.s3-mock"
+    s3_df_text = s3_dockerfile.read_text(encoding="utf-8")
+    assert "moto" in s3_df_text
+    assert "moto_server" in s3_df_text
+
+    compose_data = yaml.safe_load(compose_file.read_text(encoding="utf-8"))
+    services = compose_data.get("services", {})
+    assert {"s3-mock", "terraform-init", "airflow-cloud"}.issubset(services.keys())
+
+    for svc_name in ("s3-mock", "terraform-init", "airflow-cloud"):
+        assert "cloud" in services[svc_name].get("profiles", []), f"{svc_name} must be opt-in under profile 'cloud'"
+
+    # Default local Airflow services must remain active with no profile lock
+    for local_svc in ("postgres", "airflow-init", "airflow-webserver", "airflow-scheduler"):
+        assert not services[local_svc].get("profiles"), f"{local_svc} must remain active in default profile"
+
+    assert "hashicorp/terraform:1.9" in str(services["terraform-init"].get("image", ""))
+    tf_cmd = " ".join(str(x) for x in services["terraform-init"].get("command", []))
+    assert "apply" in tf_cmd and "local-docker.tfvars" in tf_cmd
+
+    cloud_env = services["airflow-cloud"].get("environment", {})
+    assert cloud_env.get("LAKEHOUSE_S3_BRONZE_BUCKET") == "s3://settlement-lakehouse-bronze-dev"
+    assert cloud_env.get("AWS_ENDPOINT_URL") == "http://s3-mock:5000"
+    assert cloud_env.get("AWS_ALLOW_HTTP") == "true"
+    assert cloud_env.get("AWS_S3_ALLOW_UNSAFE_RENAME") == "true"
+
+    dag_text = AIRFLOW_DAG_FILE.read_text(encoding="utf-8")
+    assert 'startswith("s3://")' in dag_text, "prepare_batch_config must keep DuckDB local when base path is s3://"
+
+    env_text = env_example.read_text(encoding="utf-8")
+    assert "LAKEHOUSE_S3_BRONZE_BUCKET" in env_text
+    assert "AWS_ENDPOINT_URL" in env_text
+
+
 def test_orchestration_tasks_import_without_dagster_dependency():
     """Isolated runtimes (Airflow /opt/lakehouse_venv) can import tasks.py without Dagster installed."""
     probe_code = (

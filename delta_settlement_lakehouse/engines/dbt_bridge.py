@@ -20,6 +20,7 @@ from delta_settlement_lakehouse.engines.delta_storage import (
     DLQ_SCHEMA,
     DeltaLakeStorage,
     SILVER_SCHEMA,
+    resolve_lakehouse_storage,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -86,11 +87,19 @@ class DeltaAnalyticsBridge:
         self,
         lakehouse_base_path: str | Path,
         duckdb_path: Path = DEFAULT_DUCKDB_PATH,
+        storage_options: dict[str, str] | None = None,
+        zone_buckets: dict[str, str] | None = None,
     ) -> dict[str, int]:
         """Register committed Delta Lake Silver/DLQ snapshots inside DuckDB raw_lakehouse schema."""
         duckdb_file = Path(duckdb_path)
         duckdb_file.parent.mkdir(parents=True, exist_ok=True)
-        storage = DeltaLakeStorage(base_path=lakehouse_base_path)
+        storage = resolve_lakehouse_storage(
+            DeltaLakeStorage,
+            lakehouse_base_path,
+            default_base_path=DEFAULT_LAKEHOUSE_BASE_PATH,
+            storage_options=storage_options,
+            zone_buckets=zone_buckets,
+        )
         row_counts: dict[str, int] = {}
 
         conn = duckdb.connect(str(duckdb_file))

@@ -6,7 +6,6 @@ from pathlib import Path
 import re
 import time
 
-from deltalake import DeltaTable
 import pyarrow.compute as pc
 
 from delta_settlement_lakehouse.domain.models import RawPaymentEvent
@@ -19,7 +18,10 @@ from delta_settlement_lakehouse.engines.dbt_bridge import (
     DbtRunResult,
     DeltaAnalyticsBridge,
 )
-from delta_settlement_lakehouse.engines.delta_storage import DeltaLakeStorage
+from delta_settlement_lakehouse.engines.delta_storage import (
+    DeltaLakeStorage,
+    resolve_lakehouse_storage,
+)
 from delta_settlement_lakehouse.services.bronze_service import BronzeService
 from delta_settlement_lakehouse.services.silver_service import SilverService
 
@@ -60,8 +62,7 @@ def _derive_batch_seed(base_seed: int, batch_date: str) -> int:
 
 
 def _delete_delta_partition(storage: DeltaLakeStorage, table_name: str, predicate: str) -> None:
-    if storage.table_exists(table_name):
-        DeltaTable(storage._get_table_path(table_name)).delete(predicate=predicate)
+    storage.delete_where(table_name, predicate)
 
 
 def execute_bronze_ingestion(
@@ -71,11 +72,19 @@ def execute_bronze_ingestion(
     seed: int = 42,
     inject_chaos: bool = True,
     chaos_ratio: float = 0.08,
+    storage_options: dict[str, str] | None = None,
+    zone_buckets: dict[str, str] | None = None,
 ) -> BronzeTaskResult:
     """Generate and idempotently ingest a deterministic batch into Delta bronze_raw_events."""
     start = time.perf_counter()
     clean_date = validate_batch_date(batch_date)
-    storage = DeltaLakeStorage(base_path=lakehouse_base_path)
+    storage = resolve_lakehouse_storage(
+        DeltaLakeStorage,
+        lakehouse_base_path,
+        default_base_path=DEFAULT_LAKEHOUSE_BASE_PATH,
+        storage_options=storage_options,
+        zone_buckets=zone_buckets,
+    )
     _delete_delta_partition(storage, "bronze_raw_events", f"ingestion_date = '{clean_date}'")
 
     effective_seed = _derive_batch_seed(seed, clean_date)
@@ -100,11 +109,19 @@ def execute_silver_contract_gate(
     duckdb_path: Path = DEFAULT_DUCKDB_PATH,
     dbt_project_dir: Path = DEFAULT_DBT_PROJECT_DIR,
     batch_date: str = "2026-10-08",
+    storage_options: dict[str, str] | None = None,
+    zone_buckets: dict[str, str] | None = None,
 ) -> SilverTaskResult:
     """Validate Bronze batch against financial contracts, route to Silver/DLQ, and hydrate DuckDB."""
     start = time.perf_counter()
     clean_date = validate_batch_date(batch_date)
-    storage = DeltaLakeStorage(base_path=lakehouse_base_path)
+    storage = resolve_lakehouse_storage(
+        DeltaLakeStorage,
+        lakehouse_base_path,
+        default_base_path=DEFAULT_LAKEHOUSE_BASE_PATH,
+        storage_options=storage_options,
+        zone_buckets=zone_buckets,
+    )
 
     bronze_table = storage.read_table("bronze_raw_events")
     filtered = bronze_table.filter(pc.equal(bronze_table["ingestion_date"], clean_date))
@@ -131,6 +148,8 @@ def execute_silver_contract_gate(
     bridge.hydrate_sources(
         lakehouse_base_path=lakehouse_base_path,
         duckdb_path=Path(duckdb_path),
+        storage_options=storage_options,
+        zone_buckets=zone_buckets,
     )
 
     elapsed_ms = round((time.perf_counter() - start) * 1000, 2)
