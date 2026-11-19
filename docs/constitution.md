@@ -1,4 +1,4 @@
-﻿# 📜 Constitución del Proyecto — delta-settlement-lakehouse
+# 📜 Constitución del Proyecto — delta-settlement-lakehouse
 ## Principios Innegociables del Software
 
 1. **Simplicidad del Stack:** Python 3.12+, tipado estricto con Pydantic/dataclasses, Pytest. Cero dependencias pesadas sin justificación técnica.
