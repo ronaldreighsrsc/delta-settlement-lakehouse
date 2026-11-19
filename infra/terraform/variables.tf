@@ -58,3 +58,14 @@ variable "budget_alert_email" {
   default     = "alerts@example.com"
 }
 
+variable "enable_aws_catalog_observability" {
+  description = "Provision AWS Glue Data Catalog, Athena Workgroup, EventBridge + Lambda trigger, and CloudWatch DLQ alarms (Spec 005)."
+  type        = bool
+  default     = false
+}
+
+variable "athena_bytes_scanned_cutoff_per_query" {
+  description = "FinOps guardrail: maximum bytes scanned per Athena query before automatic cancellation (default 1 GiB)."
+  type        = number
+  default     = 1073741824
+}

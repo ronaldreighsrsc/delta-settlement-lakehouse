@@ -43,3 +43,17 @@ output "iam_policy_arn" {
   value       = aws_iam_policy.lakehouse_s3_rw.arn
 }
 
+output "glue_catalog_database_name" {
+  description = "AWS Glue Data Catalog database name when Spec 005 catalog resources are enabled."
+  value       = try(aws_glue_catalog_database.settlement_lakehouse_db[0].name, null)
+}
+
+output "athena_workgroup_name" {
+  description = "Amazon Athena FinOps workgroup name when Spec 005 catalog resources are enabled."
+  value       = try(aws_athena_workgroup.settlement_analytics[0].name, null)
+}
+
+output "dlq_cloudwatch_alarm_name" {
+  description = "Amazon CloudWatch Metric Alarm name monitoring QuarantineRecordCount > 0."
+  value       = try(aws_cloudwatch_metric_alarm.dlq_quarantine_anomaly_alarm[0].alarm_name, null)
+}

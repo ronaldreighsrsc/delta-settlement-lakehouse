@@ -5,13 +5,15 @@
 ![Delta Lake](https://img.shields.io/badge/Storage-Delta%20Lake%20(delta--rs)-00ADD8.svg?style=flat-square)
 ![AWS S3](https://img.shields.io/badge/Cloud%20Lake-AWS%20S3%20%7C%20Moto%20%240-FF9900.svg?style=flat-square)
 ![Terraform](https://img.shields.io/badge/IaC-Terraform%20HCL-7B42BC.svg?style=flat-square)
+![AWS Glue & Athena](https://img.shields.io/badge/Catalog%20%26%20SQL-AWS%20Glue%20%2B%20Athena%20FinOps-FF9900.svg?style=flat-square)
+![EventBridge & CloudWatch](https://img.shields.io/badge/Event--Driven%20%26%20Ops-EventBridge%20%2B%20Lambda%20%2B%20CloudWatch-E7157B.svg?style=flat-square)
 ![Compute Engine](https://img.shields.io/badge/Compute-DuckDB%20%2B%20PyArrow-FFF000.svg?style=flat-square)
 ![dbt](https://img.shields.io/badge/Transform-dbt--duckdb-FF694B.svg?style=flat-square)
 ![Dagster](https://img.shields.io/badge/Orchestrator-Dagster%20SDA-4F43DD.svg?style=flat-square)
 ![Airflow](https://img.shields.io/badge/Orchestrator-Airflow%202.10%20Docker-017CEE.svg?style=flat-square)
 ![Architecture](https://img.shields.io/badge/Pattern-Medallion%20(Bronze%20%E2%86%92%20Silver%20%E2%86%92%20Gold)-brightgreen.svg?style=flat-square)
 ![Data Governance](https://img.shields.io/badge/Governance-Data%20Contracts%20%2B%20DLQ-red.svg?style=flat-square)
-![Tests](https://img.shields.io/badge/Tests-44%2F44%20Passing%20(100%25)-success.svg?style=flat-square)
+![Tests](https://img.shields.io/badge/Tests-50%2F50%20Passing%20(100%25)-success.svg?style=flat-square)
 ![Zero JVM](https://img.shields.io/badge/Runtime-Zero--JVM%20Native%20Python-purple.svg?style=flat-square)
 
 ---
@@ -27,6 +29,7 @@ In global cross-border B2B clearing and multi-currency commerce, financial platf
 * 📊 **Kimball Star Schema & Modular dbt SQL Marts:** Dimensional analytics (`dim_corridors`, `fct_daily_settlements`, `fct_counterparty_exposure`) built cleanly with `dbt-duckdb`, declarative YAML schema tests, and singular financial reconciliation assertions.
 * 🔗 **Dual Orchestration (Dagster SDA + Containerized Apache Airflow):** Shared pure task primitives (`orchestration/tasks.py`) power both native Dagster `@asset`/`@dbt_assets` lineage and a containerized **Apache Airflow 2.10 (`LocalExecutor` + PostgreSQL)** TaskFlow DAG (`@dag` / `@task.external_python`).
 * ☁️ **Terraform IaC & Dual `s3://` / Local Storage:** Declarative HCL (`infra/terraform/`) provisions 4 isolated Medallion S3 buckets (`bronze`, `silver`, `dlq`, `gold`), PublicAccessBlock, versioning, lifecycle retention, scoped IAM roles/policies, and toggleable AWS Budgets cost guardrails — runnable at **\$0 cost** against local Docker Moto (`s3-mock`) / LocalStack or promoted seamlessly to an **AWS Free Plan** account.
+* 🛰️ **AWS Glue Data Catalog, Amazon Athena FinOps, EventBridge + Lambda & CloudWatch Observability (Spec 005):** Extends the cloud control plane with deterministic Schema-as-Code (`aws_glue_catalog_database` + `aws_glue_catalog_table` for `silver_settlements` and `fct_daily_settlements`), an **Amazon Athena** workgroup enforcing `bytes_scanned_cutoff_per_query` FinOps guardrails, **Amazon EventBridge** + **AWS Lambda** event-driven S3 Bronze ingestion triggers, and **Amazon CloudWatch** Embedded Metric Format (EMF) telemetry (`src/lakehouse/aws_observability.py`) with automated DLQ anomaly alarms (`QuarantineRecordCount > 0` in `SettlementLakehouse/DataQuality`).
 
 ---
 
@@ -120,6 +123,13 @@ Gold layer dimensional models are transformed declaratively in SQL (`dbt-duckdb`
 * **Least-Privilege IAM & Cost Guardrail:** Scoped IAM runtime role/policy restricted strictly to the 4 Medallion bucket ARNs, plus a toggleable `aws_budgets_budget` (`$1.00/mo` with 80% email threshold when targeting live AWS).
 * **Dual `DeltaLakeStorage` (`delta-rs`):** Seamlessly resolves `s3://` zone URIs via `LAKEHOUSE_S3_*_BUCKET` environment variables and `storage_options`, while defaulting to native filesystem directories on local runs.
 
+### F. AWS Glue Catalog, Amazon Athena FinOps, EventBridge + Lambda & CloudWatch Observability (Spec 005)
+To bridge open-source Delta/DuckDB local execution with enterprise AWS Lakehouse governance, Spec 005 adds:
+* **AWS Glue Data Catalog (Schema-as-Code):** `aws_glue_catalog_database` (`settlement_lakehouse_db`) and `aws_glue_catalog_table` definitions (`silver_settlements`, `fct_daily_settlements`) with explicit `ParquetHiveSerDe` columns and partition keys (`settlement_currency`, `settlement_date`), eliminating non-deterministic Glue Crawler schema drift.
+* **Amazon Athena FinOps Workgroup & Serverless SQL:** `aws_athena_workgroup` configured with `enforce_workgroup_configuration = true` and a 1 GiB `bytes_scanned_cutoff_per_query` FinOps ceiling alongside partition-pruned `aws_athena_named_query` reconciliations.
+* **Event-Driven Ingestion (`Amazon EventBridge` + `AWS Lambda`):** `aws_cloudwatch_event_rule` intercepts `aws.s3` `Object Created` events on the Bronze bucket and triggers `aws_lambda_function` (`bronze_ingestion_trigger`) via `aws_cloudwatch_event_target`.
+* **CloudWatch EMF Telemetry & DLQ Alarms (`src/lakehouse/aws_observability.py`):** Emits structured CloudWatch Embedded Metric Format (EMF) / `put_metric_data` payloads (`QuarantineRecordCount`, `SilverValidRecordCount`, `PipelineLatencyMs`) under namespace `SettlementLakehouse/DataQuality`, paired with an `aws_cloudwatch_metric_alarm` that fires whenever `QuarantineRecordCount > 0`, plus deterministic Glue `BatchCreatePartition` and Athena `ALTER TABLE ... ADD IF NOT EXISTS PARTITION` DDL builders.
+
 ---
 
 ## ⚡ 4. Quickstart Guide (60 Seconds)
@@ -139,7 +149,7 @@ pip install -r requirements.txt
 ```bash
 py -m pytest tests -v
 ```
-*(44 unit, integration, dbt SQL, S3 dual-storage, Terraform HCL contract, Dagster DAG, Airflow AST/Docker Compose, and CLI tests passing at 100%)*.
+*(50 unit, integration, dbt SQL, S3 dual-storage, Terraform HCL contract, Glue/Athena/EventBridge/CloudWatch Spec 005, Dagster DAG, Airflow AST/Docker Compose, and CLI tests passing at 100%)*.
 
 ### 3. Run the End-to-End Orchestrated DAG (Dagster + dbt-duckdb)
 ```bash
@@ -249,12 +259,16 @@ delta-settlement-lakehouse/
 │       └── environments/         # local-docker.tfvars, localstack.tfvars, aws-free-tier.tfvars.example
 ├── docs/
 │   └── constitution.md           # 6 Immutable engineering invariants
+├── src/
+│   └── lakehouse/
+│       └── aws_observability.py  # CloudWatch EMF/PutMetricData, Glue Partition & Athena DDL builders
 ├── specs/
 │   ├── 001-core-medallion-lakehouse/
 │   ├── 002-dbt-analytics-and-dag-orchestration/
 │   ├── 003-airflow-container-dag/
-│   └── 004-terraform-s3-lakehouse/
-├── tests/                        # 100% automated Pytest test suite (44 tests)
+│   ├── 004-terraform-s3-lakehouse/
+│   └── 005-aws-catalog-eventbridge-cloudwatch/
+├── tests/                        # 100% automated Pytest test suite (50 tests)
 ├── Dockerfile.airflow            # Custom Airflow 2.10.5 image with isolated /opt/lakehouse_venv
 ├── Dockerfile.s3-mock            # Lightweight Moto S3/IAM emulator container for $0 cloud tests
 ├── docker-compose.yml            # Postgres 16 + Airflow + opt-in `cloud` profile (s3-mock, terraform-init)
